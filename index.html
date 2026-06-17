@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>重力シミュレーター</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; user-select:none; }
+canvas { display:block; }
+#hud {
+  position:fixed; top:16px; left:16px;
+  color:rgba(255,255,255,0.7); font:13px/1.8 monospace;
+  pointer-events:none;
+}
+#controls {
+  position:fixed; top:16px; right:16px;
+  display:flex; flex-direction:column; gap:8px; align-items:flex-end;
+}
+button {
+  background:rgba(255,255,255,0.08); color:#fff;
+  border:1px solid rgba(255,255,255,0.2); padding:7px 16px;
+  border-radius:20px; cursor:pointer; font:13px monospace;
+  transition:background .15s;
+}
+button:hover { background:rgba(255,255,255,0.2); }
+#tip {
+  position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+  color:rgba(255,255,255,0.4); font:12px monospace; pointer-events:none;
+  transition:opacity 1s;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div id="info"></div>
+</div>
+<div id="controls">
+  <button onclick="addBlackHole()">ブラックホール追加</button>
+  <button onclick="scatter()">ランダム散布</button>
+  <button onclick="bodies=[]; trails=[]; explosions=[]">全消去</button>
+  <button onclick="toggleTrail()">軌跡 ON/OFF</button>
+  <button onclick="G = G===200?800:200">重力 切替</button>
+</div>
+<div id="tip">クリック&ドラッグで星を投げる　ホイールで質量変更</div>
+
+<canvas id="trailCanvas" style="position:fixed;top:0;left:0;pointer-events:none"></canvas>
+
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+const tc = document.getElementById('trailCanvas');
+const tctx = tc.getContext('2d');
+let W, H;
+function resize() {
+  W = c.width = tc.width = window.innerWidth;
+  H = c.height = tc.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+let G = 200;
+let showTrail = true;
+let bodies = [];
+let explosions = [];
+let idSeq = 0;
+
+const PALETTES = [
+  ['#4fc3f7','#0288d1'],['#ef5350','#b71c1c'],['#66bb6a','#2e7d32'],
+  ['#ffa726','#e65100'],['#ab47bc','#6a1b9a'],['#26c6da','#00838f'],
+  ['#ec407a','#880e4f'],['#d4e157','#827717'],
+];
+
+class Body {
+  constructor(x, y, vx, vy, mass, isBlackHole=false) {
+    this.id = idSeq++;
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.mass = mass;
+    this.isBlackHole = isBlackHole;
+    const p = PALETTES[this.id % PALETTES.length];
+    this.color = isBlackHole ? '#000' : p[0];
+    this.rim   = isBlackHole ? '#8844ff' : p[1];
+    this.trail = [];
+    this.age = 0;
+  }
+  get radius() {
+    if (this.isBlackHole) return Math.cbrt(this.mass) * 2.2;
+    return Math.cbrt(this.mass) * 1.6;
+  }
+}
+
+function addBlackHole() {
+  const b = new Body(
+    Math.random()*W*0.8+W*0.1,
+    Math.random()*H*0.8+H*0.1,
+    (Math.random()-0.5)*30,
+    (Math.random()-0.5)*30,
+    4000, true
+  );
+  bodies.push(b);
+}
+
+function scatter() {
+  for (let i = 0; i < 12; i++) {
+    bodies.push(new Body(
+      Math.random()*W*0.8+W*0.1,
+      Math.random()*H*0.8+H*0.1,
+      (Math.random()-0.5)*60,
+      (Math.random()-0.5)*60,
+      80 + Math.random()*200,
+    ));
+  }
+}
+
+function toggleTrail() {
+  showTrail = !showTrail;
+  tctx.clearRect(0,0,W,H);
+}
+
+scatter();
+
+let drag = null;
+let pendingMass = 150;
+
+window.addEventListener('wheel', e => {
+  pendingMass = Math.max(20, Math.min(8000, pendingMass * (e.deltaY > 0 ? 0.85 : 1.18)));
+});
+
+c.addEventListener('mousedown', e => {
+  drag = { x: e.clientX, y: e.clientY, t: Date.now() };
+});
+
+c.addEventListener('mousemove', e => {
+  if (drag) { drag.ex = e.clientX; drag.ey = e.clientY; }
+});
+
+c.addEventListener('mouseup', e => {
+  if (!drag) return;
+  const dx = (e.clientX - drag.x) * 2.5;
+  const dy = (e.clientY - drag.y) * 2.5;
+  bodies.push(new Body(drag.x, drag.y, dx, dy, pendingMass));
+  drag = null;
+});
+
+c.addEventListener('mouseleave', () => { drag = null; });
+
+c.addEventListener('touchstart', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  drag = { x: t.clientX, y: t.clientY };
+});
+c.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  if (drag) { drag.ex = t.clientX; drag.ey = t.clientY; }
+});
+c.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (!drag || !drag.ex) { drag=null; return; }
+  const dx = (drag.ex - drag.x) * 2.5;
+  const dy = (drag.ey - drag.y) * 2.5;
+  bodies.push(new Body(drag.x, drag.y, dx, dy, pendingMass));
+  drag = null;
+});
+
+function spawnExplosion(x, y, color, count=30) {
+  for (let i=0; i<count; i++) {
+    const angle = Math.random()*Math.PI*2;
+    const spd = 30 + Math.random()*150;
+    explosions.push({
+      x, y,
+      vx: Math.cos(angle)*spd,
+      vy: Math.sin(angle)*spd,
+      life: 1,
+      decay: 0.015 + Math.random()*0.03,
+      r: 1.5 + Math.random()*3,
+      color,
+    });
+  }
+}
+
+const DT = 0.016;
+const SOFTENING = 30;
+
+function step() {
+  for (let i=0; i<bodies.length; i++) {
+    let ax=0, ay=0;
+    const bi = bodies[i];
+    for (let j=0; j<bodies.length; j++) {
+      if (i===j) continue;
+      const bj = bodies[j];
+      const dx = bj.x - bi.x;
+      const dy = bj.y - bi.y;
+      const dist2 = dx*dx + dy*dy + SOFTENING*SOFTENING;
+      const dist  = Math.sqrt(dist2);
+      const force = G * bj.mass / dist2;
+      ax += force * dx / dist;
+      ay += force * dy / dist;
+    }
+    bi.vx += ax * DT;
+    bi.vy += ay * DT;
+  }
+  for (const b of bodies) {
+    b.x += b.vx * DT;
+    b.y += b.vy * DT;
+    b.age++;
+    if (showTrail) {
+      b.trail.push({x: b.x, y: b.y});
+      if (b.trail.length > 300) b.trail.shift();
+    }
+  }
+
+  const merged = new Set();
+  for (let i=0; i<bodies.length; i++) {
+    if (merged.has(i)) continue;
+    for (let j=i+1; j<bodies.length; j++) {
+      if (merged.has(j)) continue;
+      const bi=bodies[i], bj=bodies[j];
+      const dx=bj.x-bi.x, dy=bj.y-bi.y;
+      const d=Math.sqrt(dx*dx+dy*dy);
+      if (d < bi.radius + bj.radius) {
+        const [big,small] = bi.mass>=bj.mass ? [bi,bj] : [bj,bi];
+        const total = big.mass + small.mass;
+        big.vx = (big.vx*big.mass + small.vx*small.mass)/total;
+        big.vy = (big.vy*big.mass + small.vy*small.mass)/total;
+        big.mass = total;
+        if (big.mass > 3000) big.isBlackHole = true;
+        spawnExplosion(small.x, small.y, small.color, Math.min(50, small.mass*0.15|0));
+        merged.add(bodies.indexOf(small));
+      }
+    }
+  }
+  bodies = bodies.filter((_,i)=>!merged.has(i));
+  bodies = bodies.filter(b => b.x>-2000 && b.x<W+2000 && b.y>-2000 && b.y<H+2000);
+
+  for (const p of explosions) {
+    p.x += p.vx * DT;
+    p.y += p.vy * DT;
+    p.vx *= 0.97;
+    p.vy *= 0.97;
+    p.life -= p.decay;
+  }
+  explosions = explosions.filter(p => p.life > 0);
+}
+
+function drawBody(b) {
+  const r = b.radius;
+
+  if (b.isBlackHole) {
+    const disk = ctx.createRadialGradient(b.x, b.y, r*0.5, b.x, b.y, r*3.5);
+    disk.addColorStop(0,   'rgba(120,0,255,0.6)');
+    disk.addColorStop(0.4, 'rgba(255,100,0,0.3)');
+    disk.addColorStop(1,   'transparent');
+    ctx.fillStyle = disk;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, r*3.5, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.fillStyle = '#000';
+    ctx.shadowColor = '#7700ff';
+    ctx.shadowBlur = 30;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle = 'rgba(150,50,255,0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(b.x, b.y, r*2.2, r*0.5, 0.3, 0, Math.PI*2);
+    ctx.stroke();
+    return;
+  }
+
+  const grd = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r*3);
+  grd.addColorStop(0,   b.color + 'cc');
+  grd.addColorStop(0.5, b.color + '44');
+  grd.addColorStop(1,   'transparent');
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(b.x, b.y, r*3, 0, Math.PI*2);
+  ctx.fill();
+
+  const g2 = ctx.createRadialGradient(b.x-r*.3, b.y-r*.3, 0, b.x, b.y, r);
+  g2.addColorStop(0, '#fff');
+  g2.addColorStop(0.4, b.color);
+  g2.addColorStop(1,   b.rim);
+  ctx.shadowColor = b.color;
+  ctx.shadowBlur = r * 3;
+  ctx.fillStyle = g2;
+  ctx.beginPath();
+  ctx.arc(b.x, b.y, r, 0, Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+let tipAlpha = 1;
+let lastBodyCount = 0;
+
+function render() {
+  if (showTrail) {
+    tctx.fillStyle = 'rgba(0,0,0,0.04)';
+    tctx.fillRect(0,0,W,H);
+    for (const b of bodies) {
+      if (b.trail.length < 2) continue;
+      tctx.beginPath();
+      tctx.moveTo(b.trail[b.trail.length-2].x, b.trail[b.trail.length-2].y);
+      tctx.lineTo(b.trail[b.trail.length-1].x, b.trail[b.trail.length-1].y);
+      tctx.strokeStyle = b.color + '80';
+      tctx.lineWidth = 1;
+      tctx.stroke();
+    }
+  }
+
+  ctx.fillStyle = 'rgba(0,0,15,0.75)';
+  ctx.fillRect(0,0,W,H);
+
+  if (drag && drag.ex !== undefined) {
+    const r = Math.cbrt(pendingMass) * 1.6;
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.setLineDash([4,4]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(drag.x, drag.y);
+    ctx.lineTo(drag.ex, drag.ey);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const ang = Math.atan2(drag.ey-drag.y, drag.ex-drag.x);
+    ctx.beginPath();
+    ctx.moveTo(drag.ex, drag.ey);
+    ctx.lineTo(drag.ex - 12*Math.cos(ang-0.4), drag.ey - 12*Math.sin(ang-0.4));
+    ctx.lineTo(drag.ex - 12*Math.cos(ang+0.4), drag.ey - 12*Math.sin(ang+0.4));
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(drag.x, drag.y, r, 0, Math.PI*2);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fill();
+  } else if (drag) {
+    const r = Math.cbrt(pendingMass) * 1.6;
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(drag.x, drag.y, r, 0, Math.PI*2);
+    ctx.stroke();
+  }
+
+  for (const p of explosions) {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 4;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+
+  for (const b of bodies) drawBody(b);
+
+  for (const b of bodies) {
+    const spd = Math.hypot(b.vx, b.vy);
+    if (spd < 1) continue;
+    const nx=b.vx/spd, ny=b.vy/spd;
+    const len = Math.min(spd*0.15, 40);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(b.x+nx*len, b.y+ny*len);
+    ctx.stroke();
+  }
+
+  const ke = bodies.reduce((s,b)=>s+0.5*b.mass*(b.vx**2+b.vy**2),0);
+  document.getElementById('info').innerHTML =
+    `天体数: ${bodies.length}<br>` +
+    `総質量: ${bodies.reduce((s,b)=>s+b.mass,0)|0}<br>` +
+    `運動エネルギー: ${(ke/1e6).toFixed(1)}M<br>` +
+    `投げる質量: ${pendingMass|0} (ホイールで変更)<br>` +
+    `重力定数 G: ${G}`;
+
+  if (bodies.length !== lastBodyCount) { tipAlpha = 1; lastBodyCount = bodies.length; }
+  if (bodies.length > 3) tipAlpha = Math.max(0, tipAlpha - 0.005);
+  document.getElementById('tip').style.opacity = tipAlpha;
+}
+
+function loop() {
+  for (let i=0; i<3; i++) step();
+  render();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
