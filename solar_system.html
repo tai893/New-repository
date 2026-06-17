@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>☀ Solar System</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: sans-serif; }
+  canvas { display: block; }
+  #ui {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 12px; align-items: center;
+  }
+  button {
+    background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.3);
+    padding: 8px 18px; border-radius: 20px; cursor: pointer; font-size: 14px;
+    transition: background 0.2s;
+  }
+  button:hover { background: rgba(255,255,255,0.25); }
+  #speed-label { color: rgba(255,255,255,0.6); font-size: 13px; min-width: 90px; text-align: center; }
+  #tooltip {
+    position: fixed; pointer-events: none;
+    background: rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.3);
+    color: #fff; padding: 8px 14px; border-radius: 10px; font-size: 13px;
+    display: none; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="tooltip"></div>
+<div id="ui">
+  <button onclick="speed=Math.max(speed/2,0.01)">遅く −</button>
+  <span id="speed-label"></span>
+  <button onclick="speed=Math.min(speed*2,64)">速く ＋</button>
+  <button onclick="paused=!paused" id="pbtn">一時停止</button>
+  <button onclick="trails=!trails;trailCtx.clearRect(0,0,W,H)">軌跡 ON/OFF</button>
+</div>
+
+<canvas id="trail" style="position:fixed;top:0;left:0;pointer-events:none;opacity:0.4"></canvas>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const trailCanvas = document.getElementById('trail');
+const trailCtx = trailCanvas.getContext('2d');
+const tooltip = document.getElementById('tooltip');
+
+let W, H, cx, cy, scale;
+let speed = 1;
+let paused = false;
+let trails = true;
+let t = 0;
+let mouse = { x: -9999, y: -9999 };
+
+function resize() {
+  W = canvas.width = trailCanvas.width = window.innerWidth;
+  H = canvas.height = trailCanvas.height = window.innerHeight;
+  cx = W / 2; cy = H / 2;
+  scale = Math.min(W, H) * 0.085;
+  trailCtx.clearRect(0, 0, W, H);
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Stars ──────────────────────────────────────────────────────────────────
+const STARS = Array.from({length: 500}, () => ({
+  x: Math.random() * 3000 - 1500,
+  y: Math.random() * 3000 - 1500,
+  r: Math.random() * 1.2 + 0.2,
+  a: Math.random() * 0.5 + 0.3,
+  twinkle: Math.random() * Math.PI * 2,
+}));
+
+// ── Planets ─────────────────────────────────────────────────────────────────
+const PLANETS = [
+  { name:'Mercury', color:'#b4917a', radius:0.39, period:0.24, size:3,  ecc:0.206, incl:0.12,  moons:[] },
+  { name:'Venus',   color:'#e8c87a', radius:0.72, period:0.62, size:5,  ecc:0.007, incl:0.06,  moons:[] },
+  { name:'Earth',   color:'#4fa8e8', radius:1.00, period:1.00, size:5,  ecc:0.017, incl:0.00,
+    moons:[{name:'Moon', color:'#ccc', r:0.10, period:0.075, size:2}] },
+  { name:'Mars',    color:'#dc5a32', radius:1.52, period:1.88, size:4,  ecc:0.093, incl:0.031,
+    moons:[
+      {name:'Phobos', color:'#aaa', r:0.07, period:0.003, size:1},
+      {name:'Deimos', color:'#999', r:0.10, period:0.008, size:1},
+    ]},
+  { name:'Jupiter', color:'#e8b47a', radius:2.40, period:11.86, size:14, ecc:0.049, incl:0.023,
+    moons:[
+      {name:'Io',       color:'#f5e642', r:0.16, period:0.0048, size:3},
+      {name:'Europa',   color:'#b0c8e8', r:0.20, period:0.0096, size:2},
+      {name:'Ganymede', color:'#c8b890', r:0.26, period:0.0193, size:4},
+      {name:'Callisto', color:'#8a7a6a', r:0.33, period:0.0451, size:3},
+    ]},
+  { name:'Saturn',  color:'#e8d49a', radius:3.10, period:29.46, size:11, ecc:0.057, incl:0.043, rings:true,
+    moons:[
+      {name:'Titan', color:'#e8a832', r:0.30, period:0.044, size:4},
+      {name:'Rhea',  color:'#ccc',    r:0.22, period:0.023, size:2},
+    ]},
+  { name:'Uranus',  color:'#64d0d8', radius:3.90, period:84.01, size:8,  ecc:0.046, incl:0.014,
+    moons:[{name:'Titania', color:'#aaddff', r:0.20, period:0.023, size:2}] },
+  { name:'Neptune', color:'#3c64f0', radius:4.60, period:164.8, size:8,  ecc:0.010, incl:0.031,
+    moons:[{name:'Triton', color:'#80c0ff', r:0.18, period:-0.016, size:2}] },
+];
+
+// ── Asteroids ─────────────────────────────────────────────────────────────────
+const RNG = (s => () => { s ^= s << 13; s ^= s >> 17; s ^= s << 5; return (s >>> 0) / 2**32; })(42);
+const ASTEROIDS = Array.from({length:150}, () => ({
+  r: 1.92 + RNG() * 0.58,
+  angle: RNG() * Math.PI * 2,
+  incl: (RNG() - 0.5) * 0.15,
+  size: RNG() * 1.2 + 0.3,
+  speed: 0.45 + RNG() * 0.3,
+}));
+
+// ── Kuiper belt ───────────────────────────────────────────────────────────────
+const KUIPER = Array.from({length: 80}, () => ({
+  r: 5.2 + RNG() * 0.9,
+  angle: RNG() * Math.PI * 2,
+  size: RNG() * 0.8 + 0.2,
+  speed: 0.12 + RNG() * 0.08,
+}));
+
+// ── Comet ─────────────────────────────────────────────────────────────────────
+let comet = { angle: 0, r: 6, speed: 2.1, ecc: 0.92, a: 5, tail: [] };
+
+// ── Projection (3D → 2D with tilt) ────────────────────────────────────────────
+const TILT = 0.42;
+function project(x, y, z) {
+  const y2 = y * Math.cos(TILT) - z * Math.sin(TILT);
+  return { sx: cx + x * scale, sy: cy - y2 * scale * 0.55 };
+}
+
+function planetXYZ(p, time) {
+  const angle = (2 * Math.PI / p.period) * time;
+  const r = p.radius * (1 - p.ecc * Math.cos(angle));
+  return {
+    x: r * Math.cos(angle),
+    y: r * Math.sin(angle) * Math.cos(p.incl),
+    z: r * Math.sin(angle) * Math.sin(p.incl),
+    angle,
+  };
+}
+
+// ── Glow helper ───────────────────────────────────────────────────────────────
+function glow(ctx, x, y, r, color, alpha = 0.18) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3);
+  g.addColorStop(0, color.replace(')', `,${alpha})`).replace('rgb', 'rgba'));
+  g.addColorStop(1, 'transparent');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 3, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ── Hit test ──────────────────────────────────────────────────────────────────
+let hoveredPlanet = null;
+
+function hitTest(px, py) {
+  for (const p of PLANETS) {
+    const pos = planetXYZ(p, t);
+    const { sx, sy } = project(pos.x, pos.y, pos.z);
+    const d = Math.hypot(px - sx, py - sy);
+    if (d < p.size + 6) return p.name;
+  }
+  return null;
+}
+
+canvas.addEventListener('mousemove', e => {
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  hoveredPlanet = hitTest(e.clientX, e.clientY);
+  if (hoveredPlanet) {
+    tooltip.style.display = 'block';
+    tooltip.style.left = (e.clientX + 16) + 'px';
+    tooltip.style.top  = (e.clientY - 10) + 'px';
+    const p = PLANETS.find(p => p.name === hoveredPlanet);
+    tooltip.innerHTML = `<b>${p.name}</b><br>軌道半径: ${p.radius} AU<br>公転周期: ${p.period} 年<br>衛星数: ${p.moons.length}`;
+  } else {
+    tooltip.style.display = 'none';
+  }
+});
+
+// ── Draw loop ─────────────────────────────────────────────────────────────────
+let last = performance.now();
+
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);
+  last = now;
+  if (!paused) t += dt * speed * 0.3;
+
+  document.getElementById('speed-label').textContent =
+    `×${speed.toFixed(2)} 速`;
+
+  // Clear
+  ctx.fillStyle = '#000009';
+  ctx.fillRect(0, 0, W, H);
+
+  // Stars
+  const tStar = now / 1000;
+  for (const s of STARS) {
+    const { sx, sy } = project(s.x * 0.01, s.y * 0.01, 0);
+    if (sx < 0 || sx > W || sy < 0 || sy > H) continue;
+    const tw = Math.sin(tStar * 1.3 + s.twinkle) * 0.4 + 0.6;
+    ctx.globalAlpha = s.a * tw;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(sx, sy, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Kuiper belt
+  for (const k of KUIPER) {
+    if (!paused) k.angle += dt * k.speed * speed * 0.001;
+    const x = k.r * Math.cos(k.angle);
+    const y = k.r * Math.sin(k.angle);
+    const { sx, sy } = project(x, y, 0);
+    ctx.globalAlpha = 0.25;
+    ctx.fillStyle = '#6080a0';
+    ctx.beginPath();
+    ctx.arc(sx, sy, k.size * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Asteroid belt
+  for (const a of ASTEROIDS) {
+    if (!paused) a.angle += dt * a.speed * speed * 0.002;
+    const x = a.r * Math.cos(a.angle);
+    const y = a.r * Math.sin(a.angle) * Math.cos(a.incl);
+    const z = a.r * Math.sin(a.angle) * Math.sin(a.incl);
+    const { sx, sy } = project(x, y, z);
+    ctx.globalAlpha = 0.45;
+    ctx.fillStyle = '#887766';
+    ctx.beginPath();
+    ctx.arc(sx, sy, a.size * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Orbit paths
+  for (const p of PLANETS) {
+    ctx.beginPath();
+    for (let i = 0; i <= 120; i++) {
+      const angle = (2 * Math.PI * i) / 120;
+      const r = p.radius * (1 - p.ecc * Math.cos(angle));
+      const x = r * Math.cos(angle);
+      const y = r * Math.sin(angle) * Math.cos(p.incl);
+      const z = r * Math.sin(angle) * Math.sin(p.incl);
+      const { sx, sy } = project(x, y, z);
+      i === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
+    }
+    ctx.strokeStyle = 'rgba(80,100,160,0.25)';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  }
+
+  // Comet
+  if (!paused) comet.angle += dt * speed * 0.008;
+  {
+    const r = comet.a * (1 - comet.ecc * comet.ecc) / (1 + comet.ecc * Math.cos(comet.angle));
+    const cx2 = r * Math.cos(comet.angle) * 0.7;
+    const cy2 = r * Math.sin(comet.angle);
+    const { sx, sy } = project(cx2, cy2, 0);
+    comet.tail.push({ sx, sy, a: 1 });
+    if (comet.tail.length > 40) comet.tail.shift();
+    comet.tail.forEach((pt, i) => {
+      ctx.globalAlpha = (i / comet.tail.length) * 0.6;
+      ctx.fillStyle = '#aaccff';
+      ctx.beginPath();
+      ctx.arc(pt.sx, pt.sy, 1.5 * (i / comet.tail.length), 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#ddeeff';
+    ctx.shadowColor = '#88bbff';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // Sun
+  const sunG = ctx.createRadialGradient(cx, cy, 0, cx, cy, scale * 0.22);
+  sunG.addColorStop(0,   '#fff7a0');
+  sunG.addColorStop(0.3, '#ffdd00');
+  sunG.addColorStop(0.7, '#ff8800');
+  sunG.addColorStop(1,   'transparent');
+  ctx.fillStyle = sunG;
+  ctx.beginPath();
+  ctx.arc(cx, cy, scale * 0.22, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Sun core
+  ctx.fillStyle = '#fffbe0';
+  ctx.shadowColor = '#ffdd00';
+  ctx.shadowBlur = 40;
+  ctx.beginPath();
+  ctx.arc(cx, cy, scale * 0.06, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Planets
+  for (const p of PLANETS) {
+    const pos = planetXYZ(p, t);
+    const { sx, sy } = project(pos.x, pos.y, pos.z);
+
+    // Trail
+    if (trails && !paused) {
+      if (!p._trail) p._trail = [];
+      p._trail.push({ sx, sy });
+      if (p._trail.length > 120) p._trail.shift();
+      for (let i = 0; i < p._trail.length - 1; i++) {
+        const a = (i / p._trail.length) * 0.4;
+        trailCtx.globalAlpha = a;
+        trailCtx.strokeStyle = p.color;
+        trailCtx.lineWidth = 1;
+        trailCtx.beginPath();
+        trailCtx.moveTo(p._trail[i].sx, p._trail[i].sy);
+        trailCtx.lineTo(p._trail[i+1].sx, p._trail[i+1].sy);
+        trailCtx.stroke();
+      }
+      trailCtx.globalAlpha = 1;
+    }
+
+    // Planet glow
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = p.size * 2.5;
+
+    // Saturn rings
+    if (p.rings) {
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.scale(1, 0.28);
+      const ringG = ctx.createRadialGradient(0, 0, p.size, 0, 0, p.size * 2.8);
+      ringG.addColorStop(0,   'rgba(210,190,140,0.7)');
+      ringG.addColorStop(0.5, 'rgba(200,180,130,0.5)');
+      ringG.addColorStop(1,   'transparent');
+      ctx.fillStyle = ringG;
+      ctx.beginPath();
+      ctx.arc(0, 0, p.size * 2.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Planet body
+    const pg = ctx.createRadialGradient(sx - p.size*0.3, sy - p.size*0.3, 0, sx, sy, p.size);
+    pg.addColorStop(0, '#fff');
+    pg.addColorStop(0.3, p.color);
+    pg.addColorStop(1, p.color + '88');
+    ctx.fillStyle = pg;
+    ctx.beginPath();
+    ctx.arc(sx, sy, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Hover highlight
+    if (hoveredPlanet === p.name) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.arc(sx, sy, p.size + 5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    // Label
+    ctx.fillStyle = p.color;
+    ctx.font = `${hoveredPlanet === p.name ? 'bold ' : ''}11px sans-serif`;
+    ctx.fillText(p.name, sx + p.size + 4, sy + 4);
+
+    // Moons
+    for (const m of p.moons) {
+      const ma = (2 * Math.PI / m.period) * t;
+      const mx = pos.x + m.r * Math.cos(ma);
+      const my = pos.y + m.r * Math.sin(ma);
+      const { sx: msx, sy: msy } = project(mx, my, pos.z);
+
+      ctx.shadowColor = m.color;
+      ctx.shadowBlur = m.size;
+      ctx.fillStyle = m.color;
+      ctx.beginPath();
+      ctx.arc(msx, msy, m.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // Clock overlay
+  const years = Math.floor(t);
+  const days  = Math.floor((t - years) * 365);
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.font = '12px monospace';
+  ctx.fillText(`T = ${years}年 ${days}日`, 16, 24);
+  ctx.fillText(`☀ 太陽系シミュレーター`, 16, 42);
+
+  requestAnimationFrame(frame);
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
