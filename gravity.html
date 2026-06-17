@@ -305,7 +305,7 @@ function drawBody(b) {
   g2.addColorStop(0.4, b.color);
   g2.addColorStop(1,   b.rim);
   ctx.shadowColor = b.color;
-  ctx.shadowBlur = r * 1.5;
+  ctx.shadowBlur = r * 3;
   ctx.fillStyle = g2;
   ctx.beginPath();
   ctx.arc(b.x, b.y, r, 0, Math.PI*2);
@@ -319,7 +319,7 @@ let lastBodyCount = 0;
 function render() {
   // fade trail canvas slightly each frame
   if (showTrail) {
-    tctx.fillStyle = 'rgba(0,0,0,0.018)';
+    tctx.fillStyle = 'rgba(0,0,0,0.04)';
     tctx.fillRect(0,0,W,H);
     for (const b of bodies) {
       if (b.trail.length < 2) continue;
@@ -332,7 +332,7 @@ function render() {
     }
   }
 
-  ctx.fillStyle = 'rgba(0,0,8,0.55)';
+  ctx.fillStyle = 'rgba(0,0,15,0.75)';
   ctx.fillRect(0,0,W,H);
 
   // drag preview
