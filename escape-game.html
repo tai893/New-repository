@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>脱出ゲーム</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      font-family: 'Hiragino Kaku Gothic Pro', 'メイリオ', sans-serif;
+      touch-action: manipulation;
+    }
+
+    #game {
+      width: 100%;
+      max-width: 430px;
+      min-height: 100vh;
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #title-screen {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(160deg, #0f0c29, #302b63, #24243e);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      gap: 16px;
+    }
+
+    #title-screen h1 {
+      color: #e0c88a;
+      font-size: 2rem;
+      letter-spacing: 0.2em;
+      text-shadow: 0 0 20px rgba(224,200,138,0.5);
+    }
+
+    #title-screen p { color: #aaa; font-size: 0.85rem; }
+
+    .start-btn {
+      margin-top: 24px;
+      padding: 14px 48px;
+      background: #e0c88a;
+      color: #1a1a2e;
+      border: none;
+      border-radius: 30px;
+      font-size: 1.1rem;
+      font-weight: bold;
+      cursor: pointer;
+      letter-spacing: 0.1em;
+    }
+
+    #clear-screen {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(160deg, #0f2027, #203a43, #2c5364);
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      gap: 16px;
+    }
+
+    #clear-screen.show { display: flex; }
+
+    #clear-screen h2 {
+      color: #e0c88a;
+      font-size: 1.8rem;
+      letter-spacing: 0.15em;
+      text-shadow: 0 0 20px rgba(224,200,138,0.6);
+    }
+
+    #clear-screen p { color: #ccc; font-size: 0.9rem; }
+
+    #room {
+      flex: 1;
+      position: relative;
+      background: linear-gradient(180deg, #2c1654 0%, #1a0e33 60%, #0d0820 100%);
+      min-height: 300px;
+    }
+
+    #room::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 80px;
+      background: linear-gradient(180deg, #1a0e33, #0a0618);
+      border-top: 2px solid #3a2060;
+    }
+
+    .obj {
+      position: absolute;
+      cursor: pointer;
+      transition: filter 0.2s, transform 0.15s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      user-select: none;
+    }
+
+    .obj:active { transform: scale(0.93); }
+    .obj:hover  { filter: brightness(1.3); }
+
+    .obj-icon {
+      font-size: 3rem;
+      line-height: 1;
+      filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6));
+    }
+
+    .obj-label {
+      font-size: 0.65rem;
+      color: #c9b3e8;
+      background: rgba(0,0,0,0.5);
+      padding: 2px 8px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+
+    #obj-door    { left: 10%; top: 18%; }
+    #obj-door .obj-icon { font-size: 4.5rem; }
+    #obj-shelf   { right: 8%; top: 20%; }
+    #obj-shelf .obj-icon { font-size: 3.5rem; }
+    #obj-picture { left: 38%; top: 20%; }
+    #obj-picture .obj-icon { font-size: 2.4rem; }
+    #obj-desk    { left: 50%; transform: translateX(-50%); bottom: 90px; }
+    #obj-desk .obj-icon { font-size: 3.2rem; }
+    #obj-window  { right: 10%; top: 50%; }
+    #obj-window .obj-icon { font-size: 3rem; }
+
+    #statusbar {
+      background: rgba(0,0,0,0.7);
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #3a2060;
+    }
+
+    #statusbar span { color: #c9b3e8; font-size: 0.75rem; }
+
+    #msgbox {
+      background: rgba(10,6,24,0.95);
+      border-top: 2px solid #5a3a8a;
+      padding: 14px 16px;
+      min-height: 90px;
+      display: flex;
+      align-items: center;
+    }
+
+    #msgtext {
+      color: #ddd;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      flex: 1;
+    }
+
+    #inventory {
+      background: rgba(0,0,0,0.8);
+      border-top: 1px solid #3a2060;
+      padding: 10px 12px;
+    }
+
+    #inv-label { color: #888; font-size: 0.7rem; margin-bottom: 8px; }
+
+    #inv-items { display: flex; gap: 10px; flex-wrap: wrap; }
+
+    .inv-item {
+      background: rgba(90,58,138,0.3);
+      border: 1px solid #5a3a8a;
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 1.4rem;
+      transition: background 0.2s, transform 0.15s;
+    }
+
+    .inv-item:active { transform: scale(0.9); }
+
+    .inv-item.selected {
+      background: rgba(224,200,138,0.25);
+      border-color: #e0c88a;
+      box-shadow: 0 0 8px rgba(224,200,138,0.4);
+    }
+
+    .inv-item-name {
+      font-size: 0.6rem;
+      color: #c9b3e8;
+      text-align: center;
+      display: block;
+      margin-top: 2px;
+    }
+
+    #modal-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 50;
+    }
+
+    #modal-overlay.show { display: flex; }
+
+    #modal {
+      background: #1a0e33;
+      border: 2px solid #5a3a8a;
+      border-radius: 16px;
+      padding: 24px 20px;
+      width: 85%;
+      max-width: 320px;
+    }
+
+    #modal h3 { color: #e0c88a; text-align: center; margin-bottom: 16px; font-size: 1rem; }
+
+    #code-display {
+      background: #0a0618;
+      border: 1px solid #5a3a8a;
+      border-radius: 8px;
+      color: #e0c88a;
+      font-size: 2rem;
+      text-align: center;
+      letter-spacing: 0.4em;
+      padding: 12px;
+      margin-bottom: 16px;
+      font-family: monospace;
+      min-height: 60px;
+    }
+
+    #numpad {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .num-btn {
+      background: rgba(90,58,138,0.4);
+      border: 1px solid #5a3a8a;
+      border-radius: 10px;
+      color: #ddd;
+      font-size: 1.3rem;
+      padding: 14px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .num-btn:active { background: rgba(224,200,138,0.3); }
+    .num-btn.del { color: #ff8888; }
+    .num-btn.ok  { color: #88ff88; }
+
+    #modal-close {
+      display: block;
+      margin-top: 14px;
+      width: 100%;
+      padding: 10px;
+      background: none;
+      border: 1px solid #5a3a8a;
+      border-radius: 8px;
+      color: #888;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      25% { transform: translateX(-6px); }
+      75% { transform: translateX(6px); }
+    }
+    .shake { animation: shake 0.3s ease; }
+
+    @keyframes pop {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.3); }
+      100% { transform: scale(1); }
+    }
+    .pop { animation: pop 0.3s ease; }
+  </style>
+</head>
+<body>
+<div id="game">
+
+  <div id="title-screen">
+    <h1>🔐 脱出ゲーム</h1>
+    <p>謎を解いて部屋から脱出せよ</p>
+    <p style="color:#666;font-size:0.75rem;">オブジェクトをタップして調査しよう</p>
+    <button class="start-btn" onclick="startGame()">START</button>
+  </div>
+
+  <div id="clear-screen">
+    <div style="font-size:4rem">🎉</div>
+    <h2>脱出成功！</h2>
+    <p>おめでとうございます！</p>
+    <p id="clear-time" style="color:#e0c88a;margin-top:8px;"></p>
+    <button class="start-btn" onclick="location.reload()" style="margin-top:24px;">もう一度</button>
+  </div>
+
+  <div id="statusbar">
+    <span>🏠 謎の部屋</span>
+    <span id="flag-status">🔒 ドア：施錠中</span>
+  </div>
+
+  <div id="room">
+    <div class="obj" id="obj-door"    onclick="tapObject('door')">
+      <div class="obj-icon">🚪</div><div class="obj-label">ドア</div>
+    </div>
+    <div class="obj" id="obj-shelf"   onclick="tapObject('shelf')">
+      <div class="obj-icon">📚</div><div class="obj-label">本棚</div>
+    </div>
+    <div class="obj" id="obj-picture" onclick="tapObject('picture')">
+      <div class="obj-icon">🖼️</div><div class="obj-label">絵画</div>
+    </div>
+    <div class="obj" id="obj-desk"    onclick="tapObject('desk')">
+      <div class="obj-icon">🗄️</div><div class="obj-label">引き出し</div>
+    </div>
+    <div class="obj" id="obj-window"  onclick="tapObject('window')">
+      <div class="obj-icon">🪟</div><div class="obj-label">窓</div>
+    </div>
+  </div>
+
+  <div id="msgbox">
+    <div id="msgtext">部屋を調べてみよう。<br>オブジェクトをタップ！</div>
+  </div>
+
+  <div id="inventory">
+    <div id="inv-label">📦 所持アイテム</div>
+    <div id="inv-items">
+      <div style="color:#555;font-size:0.8rem;padding:6px 0;">なし</div>
+    </div>
+  </div>
+
+  <div id="modal-overlay">
+    <div id="modal">
+      <h3>🔢 暗証番号を入力</h3>
+      <div id="code-display">＿ ＿ ＿</div>
+      <div id="numpad"></div>
+      <button id="modal-close" onclick="closeModal()">キャンセル</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const state = {
+  flags: {
+    shelfChecked: false,
+    pictureChecked: false,
+    windowChecked: false,
+    deskChecked: false,
+    boxOpened: false,
+    doorUnlocked: false,
+  },
+  inventory: [],
+  selectedItem: null,
+  startTime: null,
+};
+
+const SECRET_CODE = '472';
+
+function msg(text) {
+  document.getElementById('msgtext').innerHTML = text;
+}
+
+function addItem(id, icon, name) {
+  if (state.inventory.find(i => i.id === id)) return;
+  state.inventory.push({ id, icon, name });
+  renderInventory();
+  msg('<b style="color:#e0c88a">' + icon + ' ' + name + '</b> を手に入れた！');
+}
+
+function renderInventory() {
+  const el = document.getElementById('inv-items');
+  if (state.inventory.length === 0) {
+    el.innerHTML = '<div style="color:#555;font-size:0.8rem;padding:6px 0;">なし</div>';
+    return;
+  }
+  el.innerHTML = state.inventory.map(item =>
+    '<div class="inv-item ' + (state.selectedItem === item.id ? 'selected' : '') + '" ' +
+    'onclick="selectItem(\'' + item.id + '\')" id="inv-' + item.id + '">' +
+    '<div>' + item.icon + '</div>' +
+    '<span class="inv-item-name">' + item.name + '</span></div>'
+  ).join('');
+}
+
+function selectItem(id) {
+  if (state.selectedItem === id) {
+    state.selectedItem = null;
+    msg('アイテムの選択を解除した。');
+  } else {
+    state.selectedItem = id;
+    const item = state.inventory.find(i => i.id === id);
+    msg('<b style="color:#e0c88a">' + item.icon + ' ' + item.name + '</b> を選択中。<br>使いたい場所をタップしよう。');
+  }
+  renderInventory();
+}
+
+function removeItem(id) {
+  state.inventory = state.inventory.filter(i => i.id !== id);
+  if (state.selectedItem === id) state.selectedItem = null;
+  renderInventory();
+}
+
+function tapObject(name) {
+  const el = document.getElementById('obj-' + name);
+  el.classList.add('pop');
+  setTimeout(function() { el.classList.remove('pop'); }, 300);
+
+  if (state.selectedItem) {
+    useItemOn(state.selectedItem, name);
+    return;
+  }
+
+  if (name === 'door')    tapDoor();
+  else if (name === 'shelf')   tapShelf();
+  else if (name === 'picture') tapPicture();
+  else if (name === 'desk')    tapDesk();
+  else if (name === 'window')  tapWindow();
+}
+
+function tapDoor() {
+  if (state.flags.doorUnlocked) { showClear(); return; }
+  if (state.flags.boxOpened) {
+    msg('ドアは施錠されている。<br><small style="color:#aaa">鍵を選択してドアをタップしよう。</small>');
+  } else {
+    msg('ドアは固く施錠されている。<br>どこかに鍵があるはずだ…');
+  }
+}
+
+function tapShelf() {
+  if (state.flags.shelfChecked) {
+    msg('本棚を調べた。<br><small style="color:#aaa">メモには「星の数は <b style="color:#e0c88a">4</b> つ」と書いてあった。</small>');
+    return;
+  }
+  state.flags.shelfChecked = true;
+  msg('本棚を調べた。<br>本の間に古いメモが挟まっていた…<br><b style="color:#e0c88a">「星の数は 4 つ」</b>');
+}
+
+function tapPicture() {
+  if (state.flags.pictureChecked) {
+    msg('絵画の裏。数字が書いてある。<br><small style="color:#aaa">「<b style="color:#e0c88a">＿ 7 ＿</b>」— 真ん中は 7 だ。</small>');
+    return;
+  }
+  state.flags.pictureChecked = true;
+  msg('絵画を裏返してみた。<br>薄い文字で数字が書いてある…<br><b style="color:#e0c88a">「＿ 7 ＿」</b><br><small style="color:#aaa">3桁のコードの真ん中は 7 のようだ。</small>');
+}
+
+function tapWindow() {
+  if (state.flags.windowChecked) {
+    msg('窓の外を見た。曇り空が広がっている。<br><small style="color:#aaa">窓枠に「<b style="color:#e0c88a">最後は 2</b>」と刻まれていた。</small>');
+    return;
+  }
+  state.flags.windowChecked = true;
+  msg('窓を調べた。開かない。<br>窓枠をよく見ると細かく彫られている…<br><b style="color:#e0c88a">「最後は 2」</b>');
+}
+
+function tapDesk() {
+  if (state.flags.boxOpened) {
+    msg('引き出しを開けた。もう中は空だ。');
+    return;
+  }
+  if (state.flags.deskChecked) {
+    msg('引き出しに鍵のかかった箱がある。<br><small style="color:#aaa">3桁の暗証番号が必要だ。</small>');
+    openModal();
+    return;
+  }
+  state.flags.deskChecked = true;
+  msg('引き出しを開けた。<br>中に<b style="color:#e0c88a">鍵のかかった小箱</b>が入っている！<br><small style="color:#aaa">3桁の暗証番号が必要なようだ。</small>');
+  setTimeout(openModal, 1000);
+}
+
+function useItemOn(itemId, target) {
+  if (itemId === 'key' && target === 'door') {
+    state.flags.doorUnlocked = true;
+    removeItem('key');
+    state.selectedItem = null;
+    document.getElementById('flag-status').textContent = '🔓 ドア：解錠済み';
+    msg('<b style="color:#88ff88">鍵がぴったりはまった！ドアの錠が開いた！</b><br><small style="color:#aaa">ドアをタップして脱出しよう！</small>');
+  } else {
+    msg('ここには使えない。');
+    const el = document.getElementById('inv-' + itemId);
+    if (el) {
+      el.classList.add('shake');
+      setTimeout(function() { el.classList.remove('shake'); }, 400);
+    }
+  }
+}
+
+var inputCode = '';
+
+function openModal() {
+  inputCode = '';
+  updateCodeDisplay();
+  document.getElementById('modal-overlay').classList.add('show');
+  renderNumpad();
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('show');
+}
+
+function renderNumpad() {
+  var nums = ['1','2','3','4','5','6','7','8','9','DEL','0','OK'];
+  document.getElementById('numpad').innerHTML = nums.map(function(n) {
+    var cls = 'num-btn';
+    if (n === 'DEL') cls += ' del';
+    if (n === 'OK')  cls += ' ok';
+    var label = n === 'DEL' ? '⌫' : n === 'OK' ? '✓' : n;
+    return '<button class="' + cls + '" onclick="pressNum(\'' + n + '\')">' + label + '</button>';
+  }).join('');
+}
+
+function pressNum(n) {
+  if (n === 'DEL') {
+    inputCode = inputCode.slice(0, -1);
+  } else if (n === 'OK') {
+    checkCode();
+    return;
+  } else {
+    if (inputCode.length >= 3) return;
+    inputCode += n;
+  }
+  updateCodeDisplay();
+}
+
+function updateCodeDisplay() {
+  var disp = document.getElementById('code-display');
+  var chars = ['＿','＿','＿'];
+  for (var i = 0; i < inputCode.length; i++) chars[i] = inputCode[i];
+  disp.textContent = chars.join(' ');
+}
+
+function checkCode() {
+  if (inputCode.length < 3) {
+    var d = document.getElementById('code-display');
+    d.classList.add('shake');
+    setTimeout(function() { d.classList.remove('shake'); }, 400);
+    return;
+  }
+  if (inputCode === SECRET_CODE) {
+    state.flags.boxOpened = true;
+    closeModal();
+    addItem('key', '🗝️', '古い鍵');
+    setTimeout(function() {
+      msg('<b style="color:#e0c88a">🗝️ 古い鍵</b> を手に入れた！<br><small style="color:#aaa">ドアに使えるかもしれない。鍵を選択してドアをタップ！</small>');
+    }, 500);
+  } else {
+    inputCode = '';
+    updateCodeDisplay();
+    var d = document.getElementById('code-display');
+    d.classList.add('shake');
+    d.style.color = '#ff6666';
+    setTimeout(function() {
+      d.classList.remove('shake');
+      d.style.color = '#e0c88a';
+    }, 400);
+    msg('暗証番号が違う…もう一度試してみよう。');
+  }
+}
+
+function showClear() {
+  var elapsed = Math.floor((Date.now() - state.startTime) / 1000);
+  var m = Math.floor(elapsed / 60);
+  var s = elapsed % 60;
+  document.getElementById('clear-time').textContent =
+    'クリアタイム：' + m + '分' + String(s).padStart(2,'0') + '秒';
+  document.getElementById('clear-screen').classList.add('show');
+}
+
+function startGame() {
+  state.startTime = Date.now();
+  document.getElementById('title-screen').style.display = 'none';
+}
+</script>
+</body>
+</html>
