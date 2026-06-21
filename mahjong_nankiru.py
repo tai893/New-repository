@@ -679,16 +679,34 @@ def _generate_tenpai_hand() -> list:
     return sorted([0, 1, 2, 9, 10, 11, 18, 19, 20, 3, 4, 27, 27])
 
 
-def generate_hand(difficulty: str = 'normal') -> list:
+def generate_hand_and_tsumo(difficulty: str = 'normal') -> tuple:
     """
-    ランダムな手牌を生成する。
+    手牌13枚とツモ牌1枚（計14枚）を生成して返す。
+    戻り値: (hand_13: list, tsumo: int)
+      hand_13 … ツモ前の手牌（ソート済み13枚）
+      tsumo   … ツモ牌（1枚）
     difficulty:
-      'easy'   → 二〜三向聴
-      'normal' → 一向聴
-      'hard'   → テンパイ（向聴数0）
+      'easy'   → ツモ後14枚が二〜三向聴
+      'normal' → ツモ後14枚が一向聴
+      'hard'   → ツモ後14枚がテンパイ（向聴数0）
     """
     if difficulty == 'hard':
-        return _generate_tenpai_hand()
+        # テンパイ形: 14枚完成形の1枚をツモ牌として扱う
+        full = _generate_tenpai_hand()   # 13枚テンパイ
+        # その手牌に有効牌（あがり牌）を1枚ツモる
+        counts = [0] * 34
+        for t in full:
+            counts[t] += 1
+        winning = [t for t in range(34) if counts[t] < 4]
+        # ランダムなあがり牌を探す
+        random.shuffle(winning)
+        for w in winning:
+            counts[w] += 1
+            if is_winning_hand(counts):
+                return (full, w)
+            counts[w] -= 1
+        # フォールバック: テンパイ手をそのままツモ牌なしで返す
+        return (full, full[-1])
 
     target = {
         'easy':   (2, 3),
@@ -696,39 +714,52 @@ def generate_hand(difficulty: str = 'normal') -> list:
     }.get(difficulty, (1, 1))
 
     deck = list(range(34)) * 4
-    for _ in range(300):
+    for _ in range(500):
         random.shuffle(deck)
-        hand = sorted(deck[:13])
-        s = shanten(hand)
-        if target[0] <= s <= target[1]:
-            return hand
+        full14 = deck[:14]
+        # 14枚のシャンテン数で判定（13枚手牌として扱う）
+        s = shanten(full14[:13])  # 13枚で判定
+        # ツモ込み14枚でのシャンテン数を簡易評価
+        s14 = shanten(full14)
+        if target[0] <= s14 <= target[1]:
+            hand13 = sorted(full14[:13])
+            tsumo = full14[13]
+            return (hand13, tsumo)
 
     # フォールバック
     random.shuffle(deck)
-    return sorted(deck[:13])
+    return (sorted(deck[:13]), deck[13])
 
 
 # ============================================================
 # 問題の表示と解答
 # ============================================================
 
-def print_problem(hand: list, show_answer: bool = False, interactive: bool = True) -> None:
-    s = shanten(hand)
+def print_problem(hand13: list, tsumo: int, show_answer: bool = False, interactive: bool = True) -> None:
+    """
+    hand13: ツモ前の手牌13枚
+    tsumo:  ツモ牌1枚
+    14枚合計を表示し、何を切るか問う。
+    """
+    full14 = hand13 + [tsumo]
+    s = shanten(full14)
+
     print()
     print('━' * 54)
     print('  麻雀 何切る問題')
     print('━' * 54)
-    print(f'  【手牌】  {hand_str(hand)}')
+    print(f'  【手牌】  {hand_str(hand13)}')
+    print(f'  【ツモ】  {tile_name_jp(tsumo)}')
     print(f'  【状況】  {shanten_str(s)}')
     print()
 
-    if s == 0:
-        print('  Q: テンパイしています。あがり牌はどれ？')
+    if s == -1:
+        print('  ツモあがり！')
     else:
-        print('  Q: 何を切りますか？')
+        print('  Q: 何を切りますか？（手牌13枚＋ツモ牌の計14枚から1枚選ぶ）')
     print()
 
-    if interactive and not show_answer:
+    if interactive and not show_answer and s != -1:
         try:
             input('  → Enter を押すと答えを表示します... ')
         except (EOFError, KeyboardInterrupt):
@@ -736,11 +767,15 @@ def print_problem(hand: list, show_answer: bool = False, interactive: bool = Tru
         print()
 
     if show_answer or interactive:
-        if s == 0:
-            print(generate_tenpai_explanation(hand))
+        if s == -1:
+            print('  おめでとうございます！ツモあがりです。')
+        elif s == 0:
+            # テンパイ維持が前提 → 打牌を探す
+            results = find_best_discards(full14)
+            print(generate_explanation(full14, results))
         else:
-            results = find_best_discards(hand)
-            print(generate_explanation(hand, results))
+            results = find_best_discards(full14)
+            print(generate_explanation(full14, results))
 
 
 # ============================================================
@@ -757,8 +792,8 @@ def run_quiz(n: int = 5, difficulty: str = 'normal') -> None:
 
     for i in range(1, n + 1):
         print(f'\n【第{i}問】')
-        hand = generate_hand(difficulty)
-        print_problem(hand, interactive=True)
+        hand13, tsumo = generate_hand_and_tsumo(difficulty)
+        print_problem(hand13, tsumo, interactive=True)
         if i < n:
             try:
                 cont = input('\n次の問題へ進みますか？ (Enter / q で終了): ')
@@ -774,15 +809,16 @@ def run_quiz(n: int = 5, difficulty: str = 'normal') -> None:
 # デモ問題（解説確認用）
 # ============================================================
 
+# (hand13, tsumo) の形式
 _DEMO = [
-    ('一向聴・字牌孤立',
-     [0, 1, 2, 9, 10, 11, 18, 19, 20, 3, 4, 27, 28]),
-    ('一向聴・嵌張 vs 両面',
-     [0, 1, 2, 9, 10, 11, 18, 19, 20, 5, 7, 4, 5]),
+    ('一向聴・字牌を切る',
+     [0, 1, 2, 9, 10, 11, 18, 19, 20, 3, 4, 27, 28], 5),
+    ('一向聴・孤立牌 vs 搭子',
+     [0, 1, 2, 9, 10, 11, 18, 19, 20, 4, 5, 7, 9], 6),
     ('テンパイ・両面待ち',
-     [0, 1, 2, 9, 10, 11, 18, 19, 20, 3, 4, 27, 27]),
-    ('テンパイ・シャンポン待ち',
-     [0, 0, 1, 2, 9, 10, 11, 18, 19, 20, 3, 3, 27]),
+     [0, 1, 2, 9, 10, 11, 18, 19, 20, 3, 4, 27, 27], 3),
+    ('テンパイ・字牌を切ってテンパイ',
+     [0, 0, 1, 2, 9, 10, 11, 18, 19, 20, 3, 3, 27], 5),
 ]
 
 
@@ -792,9 +828,9 @@ def run_demo() -> None:
     print('  麻雀 何切る問題ジェネレーター  ─  デモ')
     print('=' * 54)
 
-    for i, (desc, hand) in enumerate(_DEMO, 1):
+    for i, (desc, hand13, tsumo) in enumerate(_DEMO, 1):
         print(f'\n【デモ問題 {i}】{desc}')
-        print_problem(hand, show_answer=True, interactive=False)
+        print_problem(hand13, tsumo, show_answer=True, interactive=False)
         if i < len(_DEMO):
             try:
                 input('\n次へ → Enter: ')
@@ -832,13 +868,11 @@ if __name__ == '__main__':
     elif show_all:
         # 全答え表示モード（パイプ等で使用）
         for _ in range(n_problems):
-            hand = generate_hand(difficulty)
-            s = shanten(hand)
-            print(f'\n手牌: {hand_str(hand)}  ({shanten_str(s)})')
-            if s == 0:
-                print(generate_tenpai_explanation(hand))
-            else:
-                results = find_best_discards(hand)
-                print(generate_explanation(hand, results))
+            hand13, tsumo = generate_hand_and_tsumo(difficulty)
+            full14 = hand13 + [tsumo]
+            s = shanten(full14)
+            print(f'\n手牌: {hand_str(hand13)}  ツモ: {tile_name_jp(tsumo)}  ({shanten_str(s)})')
+            results = find_best_discards(full14)
+            print(generate_explanation(full14, results))
     else:
         run_quiz(n=n_problems, difficulty=difficulty)
